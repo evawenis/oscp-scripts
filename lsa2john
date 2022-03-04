@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# thank you
+# https://detail.chiebukuro.yahoo.co.jp/qa/question_detail/q14215205584
+
+if [ "$#" -ne 1 ]; then
+  printf '%s\n' 'usage: '"$0"' <lsadump::lsa /patch file>'
+  exit 0
+fi
+
+cat "$1" | grep 'User\|NTLM' | cut -d\  -f3 | awk '{if(NR%2){p=$0}else{print p ":" $0;p=""}}END{if(p){print p}}'
+printf '%s\n' 'john --wordlist=/usr/share/wordlists/rockyou.txt --format=NT lsadumped.txt' 1>&2
