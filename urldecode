@@ -1,0 +1,38 @@
+#!/usr/bin/env/ python3
+
+# thank you
+# https://unix.stackexchange.com/questions/159253/decoding-url-encoding-percent-encoding
+
+import sys
+import urllib.parse
+from typing import NoReturn
+
+
+def exit_err() -> NoReturn:
+    print(
+        f"error: while reading line from stdin: {sys.exc_info()[0]}", file=sys.stderr)
+    exit(1)
+
+
+def get_line() -> str:
+    try:
+        line = input()
+    except (EOFError, KeyboardInterrupt):
+        exit(0)
+    except:
+        exit_err()
+
+    return line
+
+
+def main() -> None:
+    if len(sys.argv) == 1:
+        while True:
+            print(urllib.parse.unquote_plus(get_line()))
+    else:
+        for arg in sys.argv:
+            print(urllib.parse.unquote_plus(arg))
+
+
+if __name__ == "__main__":
+    main()
