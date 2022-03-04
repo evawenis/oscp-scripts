@@ -2,19 +2,23 @@
 import sys
 from typing import NoReturn
 
+
 def exit_err() -> NoReturn:
-    print(f"error: while reading line from stdin: {sys.exc_info()[0]}", file=sys.stderr)
+    print(
+        f"error: while reading line from stdin: {sys.exc_info()[0]}", file=sys.stderr)
     exit(1)
+
 
 def get_line() -> str:
     try:
-        line = input().strip()
+        line = input()
     except (EOFError, KeyboardInterrupt):
         exit(0)
     except:
         exit_err()
 
     return line
+
 
 def quote() -> None:
     while True:
@@ -38,9 +42,10 @@ def quote() -> None:
 
         print(result)
 
+
 def main() -> None:
     quote()
 
+
 if __name__ == "__main__":
     main()
-
