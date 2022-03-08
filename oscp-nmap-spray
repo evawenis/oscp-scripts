@@ -31,6 +31,10 @@ com[15]='nmap "$ip" --top-ports 100 -v2 -Pn -sU --open -oN "$nmapdir"/nmap-sU-to
 # change this!
 basedir='/mnt/hgfs/shared-kali'
 
+for ip in "$@"; do
+  mkdir -p "$basedir"'/'"$ip"'/nmap'
+done
+
 for command in "${com[@]}"; do
   for ip in "$@"; do
     nmapdir="$basedir"'/'"$ip"'/nmap'
