@@ -13,7 +13,7 @@ fi
 
 com[0]='nmap "$ip" --top-ports 1000 -v2 -Pn -sS --open -oN "$nmapdir"/nmap-sS-top1000-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
 com[1]='nmap "$ip" --top-ports 30 -v2 -Pn -sU --open -oN "$nmapdir"/nmap-sU-top30-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
-com[2]='tcpopens="$(find "$nmapdir" ! -name '"'"'nmap-sU*'"'"' -type f -print0 | xargs -0 cat | grep -E '"'"'^[0-9]+/'"'"' | grep -oE '"'"'^[0-9]+'"'"' | sort -un | tr $'"'"'\n'"'"' , | sed '"'"'s/,$//'"'"')"'
+com[2]='tcpopens="$(cat "$nmapdir"/nmap-sS*.txt | grep -oE '"'"'^[0-9]+'"'"' | sort -un | tr '"'"'\n'"'"' '"'"','"'"' | sed '"'"'s/,$//'"'"')"'
 com[3]='nmap "$ip" -p"$tcpopens" -v2 -Pn -sS -sV --open -oN "$nmapdir"/nmap-sV-top1000-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
 com[4]='nmap "$ip" -p"$tcpopens" -v2 -Pn -sS -A --open -oN "$nmapdir"/nmap-A-top1000-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
 com[5]='nmap "$ip" -p"$tcpopens" -v2 -Pn -sS -sV --open --script vuln -oN "$nmapdir"'"'"'/nmap-vuln-top1000-'"'"'"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
@@ -23,7 +23,7 @@ com[8]='nmap "$ip" -p"$udpopens" -v2 -Pn -sU -A --open -oN "$nmapdir"/nmap-sU-A-
 com[9]='nmap "$ip" -p"$udpopens" -v2 -Pn -sU -sV -script vuln --open -oN "$nmapdir"/nmap-sU-sV-vuln-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
 com[10]='nmap "$ip" -p- -v2 -Pn -sS --open -oN "$nmapdir"/nmap-sS-all2-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
 com[11]='nmap "$ip" -p- -v2 -Pn -sS --open -oN "$nmapdir"/nmap-sS-all3-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
-com[12]='tcpopens="$(find "$nmapdir" ! -name '"'"'nmap-sU*'"'"' -type f -print0 | xargs -0 cat | grep -E '"'"'^[0-9]+/'"'"' | grep -oE '"'"'^[0-9]+'"'"' | sort -un | tr $'"'"'\n'"'"' , | sed '"'"'s/,$//'"'"')"'
+com[12]='tcpopens="$(cat "$nmapdir"/nmap-sS*.txt | grep -oE '"'"'^[0-9]+'"'"' | sort -un | tr '"'"'\n'"'"' '"'"','"'"' | sed '"'"'s/,$//'"'"')"'
 com[13]='nmap "$ip" -p"$tcpopens" -v2 -Pn -sS --open -A -oN "$nmapdir"/nmap-last-A-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
 com[14]='nmap "$ip" -p"$tcpopens" -v2 -Pn -sS --open -sV --script vuln -oN "$nmapdir"/nmap-last-vuln-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
 com[15]='nmap "$ip" --top-ports 100 -v2 -Pn -sU --open -oN "$nmapdir"/nmap-sU-top100-"$(date | tr '"'"' '"'"' '"'"'-'"'"')".txt'
