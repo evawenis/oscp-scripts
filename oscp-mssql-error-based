@@ -285,14 +285,15 @@ def main():
                 if len(raw_databases) != len(raw_tables):
                     if len(raw_databases) == 1:
                         raw_databases = [raw_databases[0]] * len(raw_tables)
+
                     elif len(raw_tables) == 1:
                         raw_tables = [raw_tables[0]] * len(raw_databases)
+
                     else:
                         print('error: argument length is different',
                               file=sys.stderr)
                         exit(1)
-                print(raw_databases)
-                print(raw_tables)
+
                 tables = retr_table_dic(raw_databases, raw_tables)
                 databases = retr_database_list(raw_databases)
                 retr_columns(session, url, header,
