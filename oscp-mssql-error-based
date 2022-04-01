@@ -280,9 +280,8 @@ def retr_proxy(raw_proxy):
 def main():
     sender = RequestSender(args)
 
-    if args.verbose:
-        global verbose
-        verbose = True
+    verbose = args.verbose
+
     if args.wait:
         try:
             global wait_sec
@@ -357,7 +356,8 @@ if __name__ == '__main__':
 
     parser.add_argument(
         'request', help='http request file (e.g. intersepted request by burp) payload place should be holded by %%5EPAYLOAD%%5E (html encoded ^PAYLOAD^)')
-    parser.add_argument('-p', '--proxy', help='http or socks5 proxy')
+    parser.add_argument(
+        '-p', '--proxy', help='http or socks5 proxy')
     parser.add_argument(
         '-w', '--wait', help='interval between request (default: 0)')
     parser.add_argument(
@@ -366,8 +366,8 @@ if __name__ == '__main__':
         '-t', '--table', help='table from which you want to dump columns (comma separate (arg[/num][,arg[/num][, ...]]))')
     parser.add_argument(
         '-c', '--column', help='column from which you want to dump data (comma separate (arg[/num][,arg[/num][, ...]]))')
-    parser.add_argument('-v', '--verbose',
-                        help='verbose mode', action='store_true')
+    parser.add_argument(
+        '-v', '--verbose', help='verbose mode', action='store_true')
     parser.add_argument(
         '-l', '--left', help='padding string for left', required=True)
     parser.add_argument(
