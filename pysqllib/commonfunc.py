@@ -1,10 +1,9 @@
 from urllib.parse import unquote_plus as urldec
 import sys
 
-
-def print_verbose(payload):
+def print_verbose(payload, left, right):
     print(
-        f"debug: {urldec(args.left + payload + args.right)}", file=sys.stderr)
+        f"debug: {urldec(left + payload + right)}", file=sys.stderr)
 
 
 def print_data(databases, tables, columns, data):

